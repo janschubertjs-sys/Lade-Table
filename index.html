@@ -72,9 +72,9 @@
   <div class="out" id="out">Ergebnis erscheint hier.</div>
 
 <script>
-const STORAGE_KEY = "ladezeit_csv_v3";
+const STORAGE_KEY = "ladezeit_csv_v4";
 
-/* deutsches Zahlenformat erlauben: 0,35 oder 0.35 */
+/* deutsches Zahlenformat erlauben */
 function parseDE(id) {
   const raw = String(document.getElementById(id).value ?? "").trim();
   const normalized = raw.replace(/\s+/g, "").replace(",", ".");
@@ -110,20 +110,20 @@ function compute() {
     throw new Error("Strompreis muss ≥ 0 sein.");
 
   const delta = (target - start) / 100;
-  const energy = cap * delta;                 // kWh im Akku
-  const idealHours = energy / power;          // h
+  const energy = cap * delta;
 
+  const idealHours = energy / power;
   const loss = Math.min(Math.max(lossP, 0), 90) / 100;
-  const gridEnergy = energy / (1 - loss);     // kWh aus dem Netz
-  const realHours = idealHours / (1 - loss);
 
-  const costIdeal = energy * price;
+  const gridEnergy = energy / (1 - loss);
+  const realHours = idealHours / (1 - loss);
   const costReal  = gridEnergy * price;
 
   return {
     cap, power, start, target, lossP, price,
-    energy, idealHours, gridEnergy, realHours,
-    costIdeal, costReal
+    energy, idealHours,
+    gridEnergy, realHours,
+    costReal
   };
 }
 
@@ -139,11 +139,17 @@ function appendEntry(r) {
   const entries = getEntries();
   entries.push({
     date: now,
-    cap: r.cap, power: r.power, start: r.start, target: r.target,
-    loss: r.lossP, price: r.price,
-    energy: r.energy, idealHours: r.idealHours,
-    gridEnergy: r.gridEnergy, realHours: r.realHours,
-    costIdeal: r.costIdeal, costReal: r.costReal
+    cap: r.cap,
+    power: r.power,
+    start: r.start,
+    target: r.target,
+    loss: r.lossP,
+    price: r.price,
+    energy: r.energy,
+    idealHours: r.idealHours,
+    gridEnergy: r.gridEnergy,
+    realHours: r.realHours,
+    costReal: r.costReal
   });
   saveEntries(entries);
 }
@@ -157,9 +163,8 @@ function calcAndSave() {
       `Ideale Ladezeit: <b>${fmtTime(r.idealHours)}</b><br><br>` +
       `Energie aus dem Netz: <b>${r.gridEnergy.toFixed(2)} kWh</b><br>` +
       `Ladezeit inkl. Verluste: <b>${fmtTime(r.realHours)}</b><br><br>` +
-      `Kosten (ideal): <b>${r.costIdeal.toFixed(2)} €</b><br>` +
-      `Kosten (realistisch): <b>${r.costReal.toFixed(2)} €</b><br><br>` +
-      `<small>Hinweis: Jeder Klick auf „Berechnen“ wird automatisch gespeichert.</small>`
+      `Kosten gesamt: <b>${r.costReal.toFixed(2)} €</b><br><br>` +
+      `<small>Automatisch gespeichert</small>`
     );
 
     appendEntry(r);
@@ -177,14 +182,14 @@ function exportCSV() {
 
   let csv =
     "Datum;Kapazität kWh;Leistung kW;Start %;Ziel %;Verluste %;Preis €/kWh;" +
-    "Energie Akku kWh;Ladezeit ideal h;Energie Netz kWh;Ladezeit real h;Kosten ideal €;Kosten real €\n";
+    "Energie Akku kWh;Ladezeit ideal h;Energie Netz kWh;Ladezeit real h;Kosten gesamt €\n";
 
   entries.forEach(e => {
     csv +=
       `${e.date};${e.cap};${e.power};${e.start};${e.target};${e.loss};${e.price};` +
-      `${Number(e.energy).toFixed(2)};${Number(e.idealHours).toFixed(2)};` +
-      `${Number(e.gridEnergy).toFixed(2)};${Number(e.realHours).toFixed(2)};` +
-      `${Number(e.costIdeal).toFixed(2)};${Number(e.costReal).toFixed(2)}\n`;
+      `${e.energy.toFixed(2)};${e.idealHours.toFixed(2)};` +
+      `${e.gridEnergy.toFixed(2)};${e.realHours.toFixed(2)};` +
+      `${e.costReal.toFixed(2)}\n`;
   });
 
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -201,7 +206,7 @@ function clearCSV() {
   alert("Alle gespeicherten Einträge gelöscht.");
 }
 
-/* Initial anzeigen, ohne zu speichern */
+/* Initial anzeigen (ohne speichern) */
 (function initialRender() {
   try {
     const r = compute();
@@ -210,8 +215,7 @@ function clearCSV() {
       `Ideale Ladezeit: <b>${fmtTime(r.idealHours)}</b><br><br>` +
       `Energie aus dem Netz: <b>${r.gridEnergy.toFixed(2)} kWh</b><br>` +
       `Ladezeit inkl. Verluste: <b>${fmtTime(r.realHours)}</b><br><br>` +
-      `Kosten (ideal): <b>${r.costIdeal.toFixed(2)} €</b><br>` +
-      `Kosten (realistisch): <b>${r.costReal.toFixed(2)} €</b>`
+      `Kosten gesamt: <b>${r.costReal.toFixed(2)} €</b>`
     );
   } catch (_) {}
 })();
