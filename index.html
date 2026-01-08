@@ -42,37 +42,44 @@
   <h1>Ladezeit & Kosten</h1>
 
   <label>Akkukapazität (kWh)
-    <input id="cap" type="number" step="0.1" value="69">
+    <input id="cap" type="text" value="69">
   </label>
 
   <label>Ladeleistung (kW)
-    <input id="power" type="number" step="0.1" value="2">
+    <input id="power" type="text" value="2">
   </label>
 
   <label>Ankunft (%)
-    <input id="start" type="number" min="0" max="100" value="35">
+    <input id="start" type="text" value="35">
   </label>
 
   <label>Ziel (%)
-    <input id="target" type="number" min="0" max="100" value="80">
+    <input id="target" type="text" value="80">
   </label>
 
   <label><small>Ladeverluste (%)</small>
-    <input id="loss" type="number" min="0" max="50" value="12">
+    <input id="loss" type="text" value="12">
   </label>
 
   <label>Strompreis (€/kWh)
-    <input id="price" type="number" step="0.01" value="0.35">
+    <input id="price" type="text" value="0,35">
   </label>
 
-  <button type="button" onclick="calcAndSave()">Berechnen (speichert automatisch)</button>
+  <button type="button" onclick="calcAndSave()">Berechnen (automatisch speichern)</button>
   <button type="button" onclick="exportCSV()">CSV exportieren</button>
   <button type="button" onclick="clearCSV()">CSV zurücksetzen</button>
 
   <div class="out" id="out">Ergebnis erscheint hier.</div>
 
 <script>
-const STORAGE_KEY = "ladezeit_csv_v2";
+const STORAGE_KEY = "ladezeit_csv_v3";
+
+/* deutsches Zahlenformat erlauben: 0,35 oder 0.35 */
+function parseDE(id) {
+  const raw = String(document.getElementById(id).value ?? "").trim();
+  const normalized = raw.replace(/\s+/g, "").replace(",", ".");
+  return Number(normalized);
+}
 
 function fmtTime(hours) {
   const totalMinutes = Math.round(hours * 60);
@@ -86,19 +93,21 @@ function show(html) {
 }
 
 function compute() {
-  const cap   = Number(document.getElementById('cap').value);
-  const power = Number(document.getElementById('power').value);
-  const start = Number(document.getElementById('start').value);
-  const target= Number(document.getElementById('target').value);
-  const lossP = Number(document.getElementById('loss').value);
-  const price = Number(document.getElementById('price').value);
+  const cap    = parseDE('cap');
+  const power  = parseDE('power');
+  const start  = parseDE('start');
+  const target = parseDE('target');
+  const lossP  = parseDE('loss');
+  const price  = parseDE('price');
 
   if (!cap || cap <= 0) throw new Error("Kapazität muss > 0 sein.");
   if (!power || power <= 0) throw new Error("Ladeleistung muss > 0 sein.");
   if (start < 0 || start > 100 || target < 0 || target > 100)
     throw new Error("Prozentwerte müssen 0–100 sein.");
-  if (target <= start) throw new Error("Ziel muss größer als Start sein.");
-  if (price < 0) throw new Error("Strompreis muss ≥ 0 sein.");
+  if (target <= start)
+    throw new Error("Ziel muss größer als Start sein.");
+  if (price < 0)
+    throw new Error("Strompreis muss ≥ 0 sein.");
 
   const delta = (target - start) / 100;
   const energy = cap * delta;                 // kWh im Akku
@@ -106,20 +115,21 @@ function compute() {
 
   const loss = Math.min(Math.max(lossP, 0), 90) / 100;
   const gridEnergy = energy / (1 - loss);     // kWh aus dem Netz
-  const realHours = idealHours / (1 - loss);  // h
+  const realHours = idealHours / (1 - loss);
 
   const costIdeal = energy * price;
   const costReal  = gridEnergy * price;
 
-  return { cap, power, start, target, lossP, price,
-           energy, idealHours, gridEnergy, realHours,
-           costIdeal, costReal };
+  return {
+    cap, power, start, target, lossP, price,
+    energy, idealHours, gridEnergy, realHours,
+    costIdeal, costReal
+  };
 }
 
 function getEntries() {
   return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
 }
-
 function saveEntries(entries) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
 }
@@ -127,7 +137,6 @@ function saveEntries(entries) {
 function appendEntry(r) {
   const now = new Date().toLocaleString("de-DE");
   const entries = getEntries();
-
   entries.push({
     date: now,
     cap: r.cap, power: r.power, start: r.start, target: r.target,
@@ -136,16 +145,13 @@ function appendEntry(r) {
     gridEnergy: r.gridEnergy, realHours: r.realHours,
     costIdeal: r.costIdeal, costReal: r.costReal
   });
-
   saveEntries(entries);
-  return entries.length;
 }
 
 function calcAndSave() {
   try {
     const r = compute();
 
-    // anzeigen
     show(
       `Benötigte Energie (Akku): <b>${r.energy.toFixed(2)} kWh</b><br>` +
       `Ideale Ladezeit: <b>${fmtTime(r.idealHours)}</b><br><br>` +
@@ -153,10 +159,9 @@ function calcAndSave() {
       `Ladezeit inkl. Verluste: <b>${fmtTime(r.realHours)}</b><br><br>` +
       `Kosten (ideal): <b>${r.costIdeal.toFixed(2)} €</b><br>` +
       `Kosten (realistisch): <b>${r.costReal.toFixed(2)} €</b><br><br>` +
-      `<small>Hinweis: Beim Klick auf „Berechnen“ wird automatisch ein Eintrag gespeichert.</small>`
+      `<small>Hinweis: Jeder Klick auf „Berechnen“ wird automatisch gespeichert.</small>`
     );
 
-    // speichern (automatisch)
     appendEntry(r);
   } catch (e) {
     show(e.message || String(e));
@@ -196,7 +201,7 @@ function clearCSV() {
   alert("Alle gespeicherten Einträge gelöscht.");
 }
 
-// Initial: nur anzeigen, NICHT speichern
+/* Initial anzeigen, ohne zu speichern */
 (function initialRender() {
   try {
     const r = compute();
@@ -208,9 +213,7 @@ function clearCSV() {
       `Kosten (ideal): <b>${r.costIdeal.toFixed(2)} €</b><br>` +
       `Kosten (realistisch): <b>${r.costReal.toFixed(2)} €</b>`
     );
-  } catch (_) {
-    // ignorieren
-  }
+  } catch (_) {}
 })();
 </script>
 </body>
