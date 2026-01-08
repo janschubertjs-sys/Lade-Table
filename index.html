@@ -74,10 +74,10 @@ function toDE(n, digits=2) {
   return n.toFixed(digits).replace(".", ",");
 }
 
-/* Excel-freundliches Datum */
+/* Kurzdatum für Excel: TT.MM.JJJJ */
 function excelDateString(d = new Date()) {
   const pad = (x) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
 }
 
 /* Kernrechnung: Kosten NUR aus Energie Netz (inkl. Verluste) */
