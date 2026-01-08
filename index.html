@@ -4,16 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Ladezeit & Kosten</title>
-
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; max-width: 560px; margin: 24px auto; padding: 0 14px; }
     h1 { text-align: center; }
-    label { display: block; margin-top: 12px; }
+    label { display:block; margin-top: 12px; }
     input { width: 100%; padding: 10px; font-size: 16px; margin-top: 6px; }
     button { margin-top: 14px; width: 100%; padding: 12px; font-size: 16px; font-weight: 600; }
     .out { margin-top: 18px; padding: 14px; background: #f3f3f3; border-radius: 10px; line-height: 1.6; }
     small { color: #555; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    .warn { color: #8a2d2d; font-weight: 600; }
   </style>
 </head>
 
@@ -36,7 +36,7 @@
     <input id="target" type="text" value="80">
   </label>
 
-  <label><small>Ladeverluste (%)</small>
+  <label>Ladeverluste (%)
     <input id="loss" type="text" value="12">
   </label>
 
@@ -51,39 +51,15 @@
   <div class="out" id="out">Ergebnis erscheint hier.</div>
 
 <script>
-const STORAGE_KEY = "ladezeit_csv_v5";
+const STORAGE_KEY = "ladezeit_csv_v6";
 
-/* Robust: erlaubt u.a. "0,35", "0,35 €", "35%", "1.234,56", "1,234.56" */
-function parseDE(id) {
-  let s = String(document.getElementById(id).value ?? "").trim();
+const nf2 = new Intl.NumberFormat("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const nf3 = new Intl.NumberFormat("de-DE", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
-  // Währungs-/Prozentzeichen und Texte entfernen
-  s = s.replace(/€/g, "").replace(/%/g, "").replace(/\s+/g, "");
-
-  if (s === "") return NaN;
-
-  const hasComma = s.includes(",");
-  const hasDot = s.includes(".");
-
-  if (hasComma && hasDot) {
-    // typischer DE-Fall: 1.234,56 -> Punkte raus, Komma zu Punkt
-    // typischer US-Fall: 1,234.56 -> Kommas raus
-    const lastComma = s.lastIndexOf(",");
-    const lastDot = s.lastIndexOf(".");
-    if (lastComma > lastDot) {
-      s = s.replace(/\./g, "").replace(",", ".");
-    } else {
-      s = s.replace(/,/g, "");
-    }
-  } else if (hasComma) {
-    // 0,35 -> 0.35
-    s = s.replace(",", ".");
-  } else {
-    // nur Punkt oder nur Ziffern -> passt
-  }
-
-  return Number(s);
-}
+function fmtEUR(x) { return nf2.format(x) + " €"; }
+function fmtKWh(x) { return nf2.format(x) + " kWh"; }
+function fmtKW(x) { return nf2.format(x) + " kW"; }
+function fmtPct(x) { return nf2.format(x) + " %"; }
 
 function fmtTime(hours) {
   const totalMinutes = Math.round(hours * 60);
@@ -96,54 +72,81 @@ function show(html) {
   document.getElementById('out').innerHTML = html;
 }
 
+/**
+ * Robust deutsches Parsing:
+ * - entfernt €, %, Leerzeichen
+ * - behandelt Tausenderpunkte: 1.234 -> 1234
+ * - behandelt Komma als Dezimaltrenner: 0,35 -> 0.35
+ * - funktioniert auch bei "1.234,56"
+ */
+function parseDE(id) {
+  let s = String(document.getElementById(id).value ?? "").trim();
+  s = s.replace(/€/g, "").replace(/%/g, "").replace(/\s+/g, "");
+
+  if (s === "") return NaN;
+
+  // Wenn Komma vorhanden => deutsches Dezimal: entferne Tausenderpunkte, Komma -> Punkt
+  if (s.includes(",")) {
+    s = s.replace(/\./g, "");   // Tausenderpunkte raus
+    s = s.replace(",", ".");    // Dezimalkomma -> Punkt
+  } else {
+    // Kein Komma: Wenn mehrere Punkte, sind es sehr wahrscheinlich Tausenderpunkte
+    const dots = (s.match(/\./g) || []).length;
+    if (dots >= 2) s = s.replace(/\./g, "");
+  }
+
+  // Restliche Nicht-Zahlen-Zeichen entfernen (Sicherheitsnetz)
+  s = s.replace(/[^0-9.\-]/g, "");
+  return Number(s);
+}
+
 function compute() {
-  const cap    = parseDE('cap');
-  const power  = parseDE('power');
-  const start  = parseDE('start');
-  const target = parseDE('target');
-  const lossP  = parseDE('loss');
-  const price  = parseDE('price');
+  const cap    = parseDE('cap');     // kWh
+  const power  = parseDE('power');   // kW
+  const start  = parseDE('start');   // %
+  const target = parseDE('target');  // %
+  const lossP  = parseDE('loss');    // %
+  const price  = parseDE('price');   // €/kWh
 
   if (!isFinite(cap) || cap <= 0) throw new Error("Kapazität muss > 0 sein.");
   if (!isFinite(power) || power <= 0) throw new Error("Ladeleistung muss > 0 sein.");
   if (!isFinite(start) || !isFinite(target) || start < 0 || start > 100 || target < 0 || target > 100)
-    throw new Error("Start/Ziel müssen Zahlen zwischen 0 und 100 sein (ohne Text).");
+    throw new Error("Start/Ziel müssen Zahlen zwischen 0 und 100 sein.");
   if (target <= start) throw new Error("Ziel muss größer als Start sein.");
   if (!isFinite(price) || price < 0) throw new Error("Strompreis muss eine Zahl ≥ 0 sein (z. B. 0,35).");
 
-  const deltaPct = target - start;                 // Prozentpunkte
-  const energy = cap * (deltaPct / 100);           // kWh im Akku
-  const idealHours = energy / power;               // h
+  const deltaPct = target - start;           // Prozentpunkte
+  const energyAkku = cap * (deltaPct / 100); // kWh im Akku (Energiezuwachs)
 
   const loss = Math.min(Math.max(lossP, 0), 90) / 100;
-  const gridEnergy = energy / (1 - loss);          // kWh aus dem Netz
-  const realHours = idealHours / (1 - loss);       // h (vereinfachte Näherung)
+  const energyNetz = energyAkku / (1 - loss);  // kWh aus dem Netz (inkl. Verluste)
 
-  const costTotal = gridEnergy * price;
+  const timeIdealH = energyAkku / power;
+  const timeRealH  = energyNetz / power;       // Näherung: Verluste bedeuten mehr Netzenergie
 
-  return {
-    cap, power, start, target, lossP, price,
-    deltaPct, energy, idealHours, loss,
-    gridEnergy, realHours, costTotal
-  };
+  const costTotal = energyNetz * price;
+
+  // Plausibilitätswarnungen (nur Hinweis, nicht blockierend)
+  const warnings = [];
+  if (cap > 200) warnings.push("Kapazität wirkt sehr hoch (>" + nf2.format(200) + " kWh). Prüfen Sie die Eingabe (keine Tausenderpunkte).");
+  if (price > 5) warnings.push("Strompreis wirkt sehr hoch (>" + nf2.format(5) + " €/kWh). Prüfen Sie, ob z. B. 0,35 gemeint ist.");
+  if (energyAkku > cap) warnings.push("Energie (Akku) ist größer als Kapazität – Eingaben prüfen.");
+
+  return { cap, power, start, target, lossP, price, deltaPct, energyAkku, energyNetz, timeIdealH, timeRealH, costTotal, warnings };
 }
 
-function getEntries() {
-  return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-}
-function saveEntries(entries) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-}
+function getEntries() { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); }
+function saveEntries(entries) { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); }
+
 function appendEntry(r) {
   const now = new Date().toLocaleString("de-DE");
   const entries = getEntries();
   entries.push({
     date: now,
-    cap: r.cap, power: r.power, start: r.start, target: r.target,
-    loss: r.lossP, price: r.price,
+    cap: r.cap, power: r.power, start: r.start, target: r.target, loss: r.lossP, price: r.price,
     deltaPct: r.deltaPct,
-    energy: r.energy, idealHours: r.idealHours,
-    gridEnergy: r.gridEnergy, realHours: r.realHours,
+    energyAkku: r.energyAkku, energyNetz: r.energyNetz,
+    timeIdealH: r.timeIdealH, timeRealH: r.timeRealH,
     costTotal: r.costTotal
   });
   saveEntries(entries);
@@ -153,16 +156,19 @@ function calcAndSave() {
   try {
     const r = compute();
 
+    const warnHtml = r.warnings.length
+      ? `<div class="warn">Achtung: ${r.warnings.map(w => "• " + w).join("<br>")}</div><br>`
+      : "";
+
     show(
-      `Ladehub: <b>${r.deltaPct.toFixed(1)} %-Punkte</b><br>` +
-      `Energie (Akku): <b>${r.energy.toFixed(2)} kWh</b><br>` +
-      `Ideale Ladezeit: <b>${fmtTime(r.idealHours)}</b><br><br>` +
-      `Verluste: <b>${r.lossP.toFixed(2)} %</b><br>` +
-      `Energie aus dem Netz: <b>${r.gridEnergy.toFixed(2)} kWh</b><br>` +
-      `Ladezeit inkl. Verluste: <b>${fmtTime(r.realHours)}</b><br><br>` +
-      `Gesamtkosten: <b>${r.costTotal.toFixed(2)} €</b><br>` +
-      `<div class="mono">Rechnung: ${r.gridEnergy.toFixed(2)} kWh × ${r.price.toFixed(3)} €/kWh = ${r.costTotal.toFixed(2)} €</div>` +
-      `<br><small>Hinweis: Jeder Klick auf „Berechnen“ wird automatisch gespeichert.</small>`
+      warnHtml +
+      `Energie (Akku): <b>${fmtKWh(r.energyAkku)}</b><br>` +
+      `Energie (Netz): <b>${fmtKWh(r.energyNetz)}</b><br>` +
+      `Ladezeit (ideal): <b>${fmtTime(r.timeIdealH)}</b><br>` +
+      `Ladezeit (real): <b>${fmtTime(r.timeRealH)}</b><br><br>` +
+      `Gesamtkosten: <b>${fmtEUR(r.costTotal)}</b><br>` +
+      `<div class="mono">Kostenformel: ${nf2.format(r.energyNetz)} kWh × ${nf3.format(r.price)} €/kWh = ${nf2.format(r.costTotal)} €</div>` +
+      `<br><small>Debug (eingelesene Werte): Kapazität=${nf2.format(r.cap)} kWh, Leistung=${nf2.format(r.power)} kW, Preis=${nf3.format(r.price)} €/kWh</small>`
     );
 
     appendEntry(r);
@@ -173,20 +179,17 @@ function calcAndSave() {
 
 function exportCSV() {
   const entries = getEntries();
-  if (entries.length === 0) {
-    alert("Keine Einträge vorhanden.");
-    return;
-  }
+  if (entries.length === 0) return alert("Keine Einträge vorhanden.");
 
   let csv =
     "Datum;Kapazität kWh;Leistung kW;Start %;Ziel %;Delta %-Punkte;Verluste %;Preis €/kWh;" +
-    "Energie Akku kWh;Ladezeit ideal h;Energie Netz kWh;Ladezeit real h;Gesamtkosten €\n";
+    "Energie Akku kWh;Energie Netz kWh;Ladezeit ideal h;Ladezeit real h;Gesamtkosten €\n";
 
   entries.forEach(e => {
     csv +=
       `${e.date};${e.cap};${e.power};${e.start};${e.target};${e.deltaPct};${e.loss};${e.price};` +
-      `${Number(e.energy).toFixed(2)};${Number(e.idealHours).toFixed(2)};` +
-      `${Number(e.gridEnergy).toFixed(2)};${Number(e.realHours).toFixed(2)};` +
+      `${Number(e.energyAkku).toFixed(2)};${Number(e.energyNetz).toFixed(2)};` +
+      `${Number(e.timeIdealH).toFixed(2)};${Number(e.timeRealH).toFixed(2)};` +
       `${Number(e.costTotal).toFixed(2)}\n`;
   });
 
@@ -204,18 +207,8 @@ function clearCSV() {
   alert("Alle gespeicherten Einträge gelöscht.");
 }
 
-/* Initial anzeigen (ohne speichern) */
-(function initialRender() {
-  try {
-    const r = compute();
-    show(
-      `Energie (Akku): <b>${r.energy.toFixed(2)} kWh</b><br>` +
-      `Energie aus dem Netz: <b>${r.gridEnergy.toFixed(2)} kWh</b><br>` +
-      `Gesamtkosten: <b>${r.costTotal.toFixed(2)} €</b><br>` +
-      `<div class="mono">Rechnung: ${r.gridEnergy.toFixed(2)} kWh × ${r.price.toFixed(3)} €/kWh = ${r.costTotal.toFixed(2)} €</div>`
-    );
-  } catch (_) {}
-})();
+// Initial: nur rechnen/anzeigen, nicht speichern
+(function initialRender() { try { calcAndSave(); /* speichert! */ } catch (_) {} })();
 </script>
 </body>
 </html>
